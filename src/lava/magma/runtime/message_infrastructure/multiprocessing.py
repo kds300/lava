@@ -22,11 +22,19 @@ from lava.magma.runtime.message_infrastructure.shared_memory_manager import (
 try:
     from lava.magma.compiler.channels.cpychannel import \
         CPyChannel, PyCChannel
+    from lava.magma.compiler.channels.pyncchannel import PyNcChannel
+    from lava.magma.compiler.channels.ncpychannel import NcPyChannel
 except ImportError:
     class CPyChannel:
         pass
 
     class PyCChannel:
+        pass
+
+    class PyNcChannel:
+        pass
+
+    class NcPyChannel:
         pass
 
 from lava.magma.core.sync.domain import SyncDomain
@@ -105,11 +113,13 @@ class MultiProcessing(MessageInfrastructureInterface):
 
     def build_actor(self, target_fn: ty.Callable, builder: ty.Union[
         ty.Dict['AbstractProcess', 'PyProcessBuilder'], ty.Dict[
-            SyncDomain, 'RuntimeServiceBuilder']]) -> ty.Any:
+            SyncDomain, 'RuntimeServiceBuilder']],
+            exception_q: mp.Queue = None) -> ty.Any:
         """Given a target_fn starts a system (os) process"""
         system_process = SystemProcess(target=target_fn,
                                        args=(),
-                                       kwargs={"builder": builder})
+                                       kwargs={"builder": builder,
+                                               "exception_q": exception_q})
         system_process.start()
         self._actors.append(system_process)
         return system_process
@@ -130,5 +140,9 @@ class MultiProcessing(MessageInfrastructureInterface):
             return PyCChannel
         elif channel_type == ChannelType.CPy:
             return CPyChannel
+        elif channel_type == ChannelType.PyNc:
+            return PyNcChannel
+        elif channel_type == ChannelType.NcPy:
+            return NcPyChannel
         else:
             raise Exception(f"Unsupported channel type {channel_type}")

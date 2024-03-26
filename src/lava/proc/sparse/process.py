@@ -3,7 +3,7 @@
 # See: https://spdx.org/licenses/
 
 import numpy as np
-from scipy.sparse import spmatrix
+from scipy.sparse import spmatrix, csr_matrix
 import typing as ty
 
 from lava.magma.core.process.process import AbstractProcess, LogConfig
@@ -21,8 +21,8 @@ class Sparse(AbstractProcess):
 
     Parameters
     ----------
-    weights : scipy.sparse.spmatrix
-        2D connection weight matrix as sparse matrix of form
+    weights : scipy.sparse.spmatrix or np.ndarray
+        2D connection weight matrix of form
         (num_flat_output_neurons, num_flat_input_neurons).
 
     weight_exp : int, optional
@@ -55,9 +55,10 @@ class Sparse(AbstractProcess):
         spikes as binary spikes (num_message_bits = 0) or as graded
         spikes (num_message_bits > 0). Default is 0.
         """
+
     def __init__(self,
                  *,
-                 weights: spmatrix,
+                 weights: ty.Union[spmatrix, np.ndarray],
                  name: ty.Optional[str] = None,
                  num_message_bits: ty.Optional[int] = 0,
                  log_config: ty.Optional[LogConfig] = None,
@@ -68,9 +69,7 @@ class Sparse(AbstractProcess):
                          log_config=log_config,
                          **kwargs)
 
-        # Transform weights to csr matrix
-        weights = weights.tocsr()
-
+        weights = self._create_csr_matrix(weights)
         shape = weights.shape
 
         # Ports
@@ -78,9 +77,18 @@ class Sparse(AbstractProcess):
         self.a_out = OutPort(shape=(shape[0],))
 
         # Variables
-        self.weights = Var(shape=shape, init=weights)
+        self.weights = Var(shape=shape, init=weights.copy())
         self.a_buff = Var(shape=(shape[0],), init=0)
         self.num_message_bits = Var(shape=(1,), init=num_message_bits)
+
+    @staticmethod
+    def _create_csr_matrix(matrix):
+        # Transform weights to csr matrix
+        if isinstance(matrix, np.ndarray):
+            matrix = csr_matrix(matrix)
+        else:
+            matrix = matrix.tocsr()
+        return matrix
 
 
 class LearningSparse(LearningConnectionProcess, Sparse):
@@ -90,8 +98,8 @@ class LearningSparse(LearningConnectionProcess, Sparse):
 
     Parameters
     ----------
-    weights : scipy.sparse.spmatrix
-        2D connection weight matrix as sparse matrix of form
+    weights : scipy.sparse.spmatrix or np.ndarray
+        2D connection weight matrix of form
         (num_flat_output_neurons, num_flat_input_neurons).
 
     weight_exp : int, optional
@@ -148,9 +156,12 @@ class LearningSparse(LearningConnectionProcess, Sparse):
         x1 and regular impulse addition to x2 will be considered by the
         learning rule Products conditioned on x0.
         """
+
     def __init__(self,
                  *,
-                 weights: spmatrix,
+                 weights: ty.Union[spmatrix, np.ndarray],
+                 tag_2: ty.Optional[ty.Union[spmatrix, np.ndarray]] = None,
+                 tag_1: ty.Optional[ty.Union[spmatrix, np.ndarray]] = None,
                  name: ty.Optional[str] = None,
                  num_message_bits: ty.Optional[int] = 0,
                  log_config: ty.Optional[LogConfig] = None,
@@ -163,6 +174,8 @@ class LearningSparse(LearningConnectionProcess, Sparse):
             learning_rule.x1_impulse = 0
 
         super().__init__(weights=weights,
+                         tag_2=tag_2,
+                         tag_1=tag_1,
                          shape=weights.shape,
                          num_message_bits=num_message_bits,
                          name=name,
@@ -171,25 +184,29 @@ class LearningSparse(LearningConnectionProcess, Sparse):
                          graded_spike_cfg=graded_spike_cfg,
                          **kwargs)
 
-        # Transform weights to csr matrix
-        weights = weights.tocsr()
+        if tag_2 is None:
+            tag_2 = np.zeros(weights.shape)
 
-        shape = weights.shape
+        if tag_1 is None:
+            tag_1 = np.zeros(weights.shape)
 
-        # Ports
-        self.s_in = InPort(shape=(shape[1],))
-        self.a_out = OutPort(shape=(shape[0],))
+        tag_2 = self._create_csr_matrix(tag_2)
+        tag_1 = self._create_csr_matrix(tag_1)
 
-        # Variables
-        self.weights = Var(shape=shape, init=weights)
-        self.a_buff = Var(shape=(shape[0],), init=0)
-        self.num_message_bits = Var(shape=(1,), init=num_message_bits)
+        self.tag_2.init = tag_2.copy()
+        self.tag_1.init = tag_1.copy()
+
+        self.proc_params["x_idx_active_syn_vars"] = {
+            "weights": weights.nonzero()[1],
+            "tag_2": tag_2.nonzero()[1],
+            "tag_1": tag_1.nonzero()[1]
+        }
 
 
 class DelaySparse(Sparse):
     def __init__(self,
                  *,
-                 weights: spmatrix,
+                 weights: ty.Union[spmatrix, np.ndarray],
                  delays: ty.Union[spmatrix, int],
                  max_delay: ty.Optional[int] = 0,
                  name: ty.Optional[str] = None,
@@ -201,7 +218,7 @@ class DelaySparse(Sparse):
 
         Parameters
         ----------
-        weights : spmatrix
+        weights : scipy.sparse.spmatrix or np.ndarray
             2D connection weight matrix of form (num_flat_output_neurons,
             num_flat_input_neurons) in C-order (row major).
 
