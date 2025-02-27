@@ -8,9 +8,9 @@ concatenates them into a single output.
 
 from lava.magma.core.process.process import AbstractProcess
 from lava.magma.core.process.ports.ports import InPort, OutPort
+from lava.proc.concatenator.models import PyScalarConcatenatorModel, PyVectorConcatenatorModel
 
-
-class AbstractConcatenator(AbstractProcess):
+class AbstractScalarConcatenator(AbstractProcess):
     """Abstract class for a concatenator"""
     x_in: dict[int, InPort]
     x_out: OutPort
@@ -29,9 +29,17 @@ class AbstractConcatenator(AbstractProcess):
         self.x_out = OutPort(shape=(self.n_inputs,))
 
 
+class AbstractVectorConcatenator(AbstractScalarConcatenator):
+    """Abstract class for a concatenator"""
+
+    def __init__(self, shape):
+        super().__init__(shape=shape)
+        self.x_out = OutPort(shape=(self.n_inputs, shape[0]))
+
+
 class Concatenator:
     """Create a Concatenator process with requested number of inputs."""
-    def __new__(cls, n_inputs, shape):
+    def __new__(cls, n_inputs, shape, mode="stack"):
         """
         Parameters
         ----------
@@ -40,11 +48,21 @@ class Concatenator:
         shape: tuple
             Shape of the InPorts. OutPort will have shape (n_inputs, *shape)
         """
+        if mode == "stack":
+            _AbstractProcess = AbstractVectorConcatenator
+            _Model           = PyVectorConcatenatorModel
+        else: # mode == "concatenate"
+            _AbstractProcess = AbstractScalarConcatenator
+            _Model           = PyScalarConcatenatorModel
+
         attrs = {'n_inputs': n_inputs}
         new_proc = type(
             f'Concatenator_{n_inputs}',
-            (AbstractConcatenator,),
+            (_AbstractProcess,),
             attrs
         )
 
-        return new_proc(shape=shape)
+        process_instance    = new_proc(shape=shape)
+        model_instance      = _Model(process_instance)
+
+        return process_instance, model_instance
